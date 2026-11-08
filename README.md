@@ -172,3 +172,35 @@ with torch.no_grad():
 ## License
 
 MIT
+
+
+## PCA dimensionality mode
+
+
+Train with `--pca-dim 8`, `--pca-dim 32`, or `--pca-dim 64`.
+Omit the flag for the original full-dimensional behavior.
+PCA is fitted on **training structures only** by a streaming covariance algorithm.
+Use `--pca-model /path/to/shared_pca.joblib` to use a previously fitted
+scikit-learn PCA model (e.g. a PCA-64 model reused for PCA-8/32/64 by truncation).
+For very large datasets you can limit the PCA fit with `--pca-max-atoms 1000000`,
+which takes the first training atoms encountered, not a random sample.
+The saved checkpoint contains `pca.mean`, `pca.components`, `pca_dim`,
+`original_dim`, and `model_config`. The inference script reconstructs them
+automatically, and NEVER fits or loads a separate PCA basis.
+
+**Caution:** Training PCA separately in the two repositories can yield different
+coordinates due to split/order. Use `--pca-model` with the same external artifact
+to compare classifier vs regressor on identical coordinates.
+No PCA model is fitted using validation or test/OOD structures.
+
+**Note:** Legacy checkpoints remain usable by the original legacy inference code;
+the new classifier `infer_mace.py` expects the newly recorded `model_config`.
+
+Full MACE end-to-end GPU execution must be tested in a compatible MACE environment.
+
+Classifier example (edit CONFIG paths in train_mace.py first):
+
+```bash
+python train_mace.py --pca-dim 32
+python infer_mace.py --mace-model model.pt --checkpoint best_model.pt --test-xyz test.xyz
+```
