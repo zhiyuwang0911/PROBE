@@ -5,6 +5,7 @@ Edit the CONFIG block below, then run:
     python train_mace.py
 """
 
+import argparse
 import numpy as np
 import torch
 from tqdm.auto import tqdm
@@ -15,6 +16,7 @@ from probe.backends.mace import (
     train_val_split_loader, process_batch_mace,
 )
 from probe.train import run_training, compute_error_boundary
+from probe.pca import ModelWithPCA, make_pca
 
 # ============================================================
 # Configuration — edit these paths before running
@@ -62,6 +64,14 @@ CONFIG = {
 # Main
 # ============================================================
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--pca-dim', type=int, default=None)
+    parser.add_argument('--pca-model', default=None)
+    parser.add_argument('--pca-max-atoms', type=int, default=None)
+    parser.add_argument('--output-dir', default=None)
+    args = parser.parse_args()
+    if args.output_dir:
+        CONFIG['output_dir'] = args.output_dir
     device = CONFIG['device']
 
     # 1. Load frozen MACE backbone
@@ -91,8 +101,18 @@ def main():
     error_bins    = torch.tensor([0.0, boundary_ev], device=device)
 
     # 4. Build PROBE model (backbone_dim auto-detected)
+    process_fn = lambda batch, dev: process_batch_mace(batch, dev, extractor)
+    projection, pca_info = make_pca(process_fn, train_loader, device,
+        args.pca_dim, extractor.feat_dim, args.pca_model, args.pca_max_atoms)
+    model_config = dict(
+        backbone_dim=args.pca_dim or extractor.feat_dim,
+        atom_encoder_hidden=CONFIG['atom_encoder_hidden'],
+        atom_encoder_output_dim=CONFIG['atom_encoder_output_dim'],
+        mol_attention_heads=CONFIG['mol_attention_heads'],
+        classifier_hidden=CONFIG['classifier_hidden'],
+        dropout=CONFIG['dropout'])
     model = PROBEModel(
-        backbone_dim=extractor.feat_dim,
+        backbone_dim=args.pca_dim or extractor.feat_dim,
         atom_encoder_hidden=CONFIG['atom_encoder_hidden'],
         atom_encoder_output_dim=CONFIG['atom_encoder_output_dim'],
         mol_attention_heads=CONFIG['mol_attention_heads'],
@@ -100,6 +120,8 @@ def main():
         dropout=CONFIG['dropout'],
     ).to(device)
 
+    if projection is not None:
+        model = ModelWithPCA(model, projection).to(device)
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"PROBE parameters: {total_params:,}")
 
@@ -124,6 +146,9 @@ def main():
         min_lr=CONFIG['min_lr'],
         gradient_clip_norm=CONFIG['gradient_clip_norm'],
         high_conf_cutoffs=CONFIG['high_conf_cutoffs'],
+        checkpoint_extra=dict(model_config=model_config, pca_dim=args.pca_dim,
+                              original_dim=extractor.feat_dim, pca_info=pca_info,
+                              task='reliability_classifier'),
     )
 
     print(f"\nTraining complete. Best epoch: {history['best_epoch']}")

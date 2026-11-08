@@ -206,7 +206,8 @@ def run_training(model, process_batch_fn: Callable,
                  gradient_clip_norm: float = 1.0,
                  class_weights=None,
                  label_smoothing: float = 0.0,
-                 high_conf_cutoffs: Optional[Dict] = None) -> dict:
+                 high_conf_cutoffs: Optional[Dict] = None,
+                 checkpoint_extra: Optional[dict] = None) -> dict:
     """
     Full training loop with validation, LR scheduling, and early stopping.
 
@@ -270,6 +271,7 @@ def run_training(model, process_batch_fn: Callable,
                 'val_loss': val_loss,
                 'val_metrics': val_results,
                 'error_bins': error_bins.cpu().tolist(),
+                **(checkpoint_extra or {}),
             }, ckpt_path)
         else:
             patience_ctr += 1
